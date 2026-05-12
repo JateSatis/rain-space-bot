@@ -1,0 +1,5 @@
+services:
+  bot:
+    image: ghcr.io/jatesatis/rain-space-bot:latest
+    restart: unless-stopped
+    env_file: .env
