@@ -6,6 +6,12 @@ function getApiUrl(): string {
   return `${telegramBase}/bot${process.env.BOT_TOKEN}`;
 }
 
+export class UserBlockedError extends Error {
+  constructor(public readonly chatId: number) {
+    super(`bot was blocked by user: chatId=${chatId}`);
+  }
+}
+
 export function describeError(err: unknown): string {
   if (axios.isAxiosError(err)) {
     const status = err.response?.status ?? "no-response";
@@ -21,6 +27,7 @@ async function withRetry<T>(label: string, fn: () => Promise<T>, retries = 2): P
     try {
       return await fn();
     } catch (err) {
+      if (axios.isAxiosError(err) && err.response?.status === 403) throw err;
       console.error(`[TG] ${label} attempt ${attempt}/${retries} failed: ${describeError(err)}`);
       if (attempt < retries) await new Promise((r) => setTimeout(r, 1500));
     }
@@ -28,24 +35,34 @@ async function withRetry<T>(label: string, fn: () => Promise<T>, retries = 2): P
 }
 
 export async function sendMessage(chatId: number, text: string): Promise<void> {
-  await withRetry("sendMessage", async () => {
-    await axios.post(`${getApiUrl()}/sendMessage`, { chat_id: chatId, text });
-    console.log(`[TG] sendMessage OK → chat=${chatId}`);
-  });
+  try {
+    await withRetry("sendMessage", async () => {
+      await axios.post(`${getApiUrl()}/sendMessage`, { chat_id: chatId, text });
+      console.log(`[TG] sendMessage OK → chat=${chatId}`);
+    });
+  } catch (err) {
+    if (axios.isAxiosError(err) && err.response?.status === 403) throw new UserBlockedError(chatId);
+    throw err;
+  }
 }
 
 export async function setMenuButton(chatId: number, miniAppUrl: string): Promise<void> {
-  await withRetry("setMenuButton", async () => {
-    await axios.post(`${getApiUrl()}/setChatMenuButton`, {
-      chat_id: chatId,
-      menu_button: {
-        type: "web_app",
-        text: "Открыть магазин",
-        web_app: { url: miniAppUrl },
-      },
+  try {
+    await withRetry("setMenuButton", async () => {
+      await axios.post(`${getApiUrl()}/setChatMenuButton`, {
+        chat_id: chatId,
+        menu_button: {
+          type: "web_app",
+          text: "Открыть магазин",
+          web_app: { url: miniAppUrl },
+        },
+      });
+      console.log(`[TG] setMenuButton OK → chat=${chatId}`);
     });
-    console.log(`[TG] setMenuButton OK → chat=${chatId}`);
-  });
+  } catch (err) {
+    if (axios.isAxiosError(err) && err.response?.status === 403) throw new UserBlockedError(chatId);
+    throw err;
+  }
 }
 
 export async function deleteWebhook(): Promise<void> {
